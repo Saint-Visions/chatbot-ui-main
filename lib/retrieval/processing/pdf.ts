@@ -23,4 +23,3 @@ export const processPdf = async (pdf: Blob): Promise<FileItemChunk[]> => {
 
   return chunks
 }
-
