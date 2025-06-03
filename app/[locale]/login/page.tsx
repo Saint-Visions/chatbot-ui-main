@@ -14,10 +14,11 @@ export const metadata: Metadata = {
   title: "Login"
 }
 
+// ✅ Fix: Use a proper PageProps interface
 export default async function Login({
   searchParams
 }: {
-  searchParams: { message: string }
+  searchParams?: Record<string, string | string[]>
 }) {
   const cookieStore = cookies()
   const supabase = createServerClient<Database>(
@@ -31,6 +32,7 @@ export default async function Login({
       }
     }
   )
+
   const session = (await supabase.auth.getSession()).data.session
 
   if (session) {
@@ -41,29 +43,22 @@ export default async function Login({
       .eq("is_home", true)
       .single()
 
-    if (!homeWorkspace) {
-      throw new Error(error.message)
-    }
+    if (!homeWorkspace) throw new Error(error.message)
 
     return redirect(`/${homeWorkspace.id}/chat`)
   }
 
   const signIn = async (formData: FormData) => {
     "use server"
-
     const email = formData.get("email") as string
     const password = formData.get("password") as string
-    const cookieStore = cookies()
-    const supabase = createClient(cookieStore)
+    const supabase = createClient(cookies())
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password
     })
-
-    if (error) {
-      return redirect(`/login?message=${error.message}`)
-    }
+    if (error) return redirect(`/login?message=${error.message}`)
 
     const { data: homeWorkspace, error: homeWorkspaceError } = await supabase
       .from("workspaces")
@@ -72,64 +67,42 @@ export default async function Login({
       .eq("is_home", true)
       .single()
 
-    if (!homeWorkspace) {
-      throw new Error(
-        homeWorkspaceError?.message || "An unexpected error occurred"
-      )
-    }
-
+    if (!homeWorkspace)
+      throw new Error(homeWorkspaceError?.message || "Unexpected error")
     return redirect(`/${homeWorkspace.id}/chat`)
   }
 
   const getEnvVarOrEdgeConfigValue = async (name: string) => {
     "use server"
-    if (process.env.EDGE_CONFIG) {
-      return await get<string>(name)
-    }
-
+    if (process.env.EDGE_CONFIG) return await get<string>(name)
     return process.env[name]
   }
 
   const signUp = async (formData: FormData) => {
     "use server"
-
     const email = formData.get("email") as string
     const password = formData.get("password") as string
 
-    const emailDomainWhitelistPatternsString = await getEnvVarOrEdgeConfigValue(
-      "EMAIL_DOMAIN_WHITELIST"
-    )
-    const emailDomainWhitelist = emailDomainWhitelistPatternsString?.trim()
-      ? emailDomainWhitelistPatternsString?.split(",")
-      : []
-    const emailWhitelistPatternsString =
-      await getEnvVarOrEdgeConfigValue("EMAIL_WHITELIST")
-    const emailWhitelist = emailWhitelistPatternsString?.trim()
-      ? emailWhitelistPatternsString?.split(",")
-      : []
+    const domainWhitelist =
+      (await getEnvVarOrEdgeConfigValue("EMAIL_DOMAIN_WHITELIST"))?.split(
+        ","
+      ) || []
+    const emailWhitelist =
+      (await getEnvVarOrEdgeConfigValue("EMAIL_WHITELIST"))?.split(",") || []
 
-    // If there are whitelist patterns, check if the email is allowed to sign up
-    if (emailDomainWhitelist.length > 0 || emailWhitelist.length > 0) {
-      const domainMatch = emailDomainWhitelist?.includes(email.split("@")[1])
-      const emailMatch = emailWhitelist?.includes(email)
-      if (!domainMatch && !emailMatch) {
-        return redirect(
-          `/login?message=Email ${email} is not allowed to sign up.`
-        )
-      }
+    if (
+      domainWhitelist.length > 0 ||
+      (emailWhitelist.length > 0 &&
+        !domainWhitelist.includes(email.split("@")[1]) &&
+        !emailWhitelist.includes(email))
+    ) {
+      return redirect(
+        `/login?message=Email ${email} is not allowed to sign up.`
+      )
     }
 
-    const cookieStore = cookies()
-    const supabase = createClient(cookieStore)
-
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        // USE IF YOU WANT TO SEND EMAIL VERIFICATION, ALSO CHANGE TOML FILE
-        // emailRedirectTo: `${origin}/auth/callback`
-      }
-    })
+    const supabase = createClient(cookies())
+    const { error } = await supabase.auth.signUp({ email, password })
 
     if (error) {
       console.error(error)
@@ -137,27 +110,18 @@ export default async function Login({
     }
 
     return redirect("/setup")
-
-    // USE IF YOU WANT TO SEND EMAIL VERIFICATION, ALSO CHANGE TOML FILE
-    // return redirect("/login?message=Check email to continue sign in process")
   }
 
   const handleResetPassword = async (formData: FormData) => {
     "use server"
-
-    const origin = headers().get("origin")
     const email = formData.get("email") as string
-    const cookieStore = cookies()
-    const supabase = createClient(cookieStore)
+    const supabase = createClient(cookies())
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${origin}/auth/callback?next=/login/password`
+      redirectTo: `${headers().get("origin")}/auth/callback?next=/login/password`
     })
 
-    if (error) {
-      return redirect(`/login?message=${error.message}`)
-    }
-
+    if (error) return redirect(`/login?message=${error.message}`)
     return redirect("/login?message=Check email to reset password")
   }
 
@@ -175,8 +139,8 @@ export default async function Login({
         <Input
           className="mb-3 rounded-md border bg-inherit px-4 py-2"
           name="email"
-          placeholder="you@example.com"
           required
+          placeholder="you@example.com"
         />
 
         <Label className="text-md" htmlFor="password">
@@ -192,7 +156,6 @@ export default async function Login({
         <SubmitButton className="mb-2 rounded-md bg-blue-700 px-4 py-2 text-white">
           Login
         </SubmitButton>
-
         <SubmitButton
           formAction={signUp}
           className="border-foreground/20 mb-2 rounded-md border px-4 py-2"
@@ -210,7 +173,7 @@ export default async function Login({
           </button>
         </div>
 
-        {searchParams?.message && (
+        {searchParams?.message && typeof searchParams.message === "string" && (
           <p className="bg-foreground/10 text-foreground mt-4 p-4 text-center">
             {searchParams.message}
           </p>
